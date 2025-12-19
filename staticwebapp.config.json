@@ -1,9 +1,26 @@
 {
   "routes": [
-    { "route": "/*", "allowedRoles": ["ADSUser", "PDXUser"] }
+    {
+      "route": "/api/*",
+      "allowedRoles": ["ADSUser", "PDXUser"]
+    },
+    {
+      "route": "/*",
+      "allowedRoles": ["ADSUser", "PDXUser"]
+    }
   ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/images/*.{png,jpg,gif}", "/css/*", "/api/*"]
+  },
   "responseOverrides": {
-    "401": { "redirect": "/.auth/login/aad", "statusCode": 302 },
-    "403": { "redirect": "/forbidden.html", "statusCode": 302 }
+    "401": {
+      "redirect": "/.auth/login/aad",
+      "statusCode": 302
+    },
+    "403": {
+      "redirect": "/forbidden.html",
+      "statusCode": 302
+    }
   }
 }
