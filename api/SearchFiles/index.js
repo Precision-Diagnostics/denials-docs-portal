@@ -14,7 +14,7 @@ module.exports = async function (context, req) {
 
     try {
         const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-        const containerName = process.env.CONTAINER_NAME || "documents";
+        const containerName = process.env.AZURE_CONTAINER_NAME || "documents";
         
         if (!connectionString) {
             throw new Error("AZURE_STORAGE_CONNECTION_STRING is not configured");
