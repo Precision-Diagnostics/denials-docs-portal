@@ -1,5 +1,4 @@
 name: Azure Static Web Apps CI/CD
-
 on:
   push:
     branches: [main]
@@ -9,29 +8,57 @@ on:
 
 jobs:
   build_and_deploy_job:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     name: Build and Deploy Job
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           fetch-depth: 0
-
+      
       - name: Cleanup git extraheader
         shell: bash
         run: |
           git config --global --unset-all http.https://github.com/.extraheader || true
-          git config --system --unset-all http.https://github.com/.extraheader || true
-
-      - name: Build And Deploy
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build application
+        run: npm run build
+      
+      - name: Get GitHub OIDC token
+        id: idtoken
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const token = await core.getIDToken();
+            return token;
+      
+      - name: Deploy to Azure Static Web Apps
+        id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_STONE_051BF3E1E }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          app_location: "/"
-          api_location: "api"
-          output_location: "dist"
+          app_location: "dist"
+          api_location: "api"        # Added API location
+          output_location: ""
+          skip_api_build: false      # Changed to false to build API
+          skip_app_build: true
+          github_id_token: ${{ steps.idtoken.outputs.result }}
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
@@ -41,4 +68,5 @@ jobs:
       - name: Close Pull Request
         uses: Azure/static-web-apps-deploy@v1
         with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_STONE_051BF3E1E }}
           action: "close"
