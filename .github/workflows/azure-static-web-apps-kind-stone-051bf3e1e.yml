@@ -23,8 +23,7 @@ jobs:
         shell: bash
         run: |
           git config --global --unset-all http.https://github.com/.extraheader || true
-          git config --system --unset-all http.https://github.com/.extraheader || true
-          
+      
       - name: Verify deployment token is present (length only)
         shell: bash
         run: |
@@ -43,8 +42,10 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_STONE_051BF3E1E }}
           action: "upload"
           app_location: "/"
-          api_location: "api"
+          api_location: ""          # disable for now
           output_location: "dist"
+          data_api_location: ""     # disable SWA DB Connections
+          skip_api_build: true
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
@@ -55,4 +56,5 @@ jobs:
         uses: Azure/static-web-apps-deploy@v1
         with:
           action: "close"
+
 
