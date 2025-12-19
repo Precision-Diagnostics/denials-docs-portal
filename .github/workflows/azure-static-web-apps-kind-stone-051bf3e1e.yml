@@ -25,11 +25,17 @@ jobs:
         run: |
           git config --global --unset-all http.https://github.com/.extraheader || true
       
-      # ADD IT HERE - Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build application
+        run: npm run build
       
       - name: Get GitHub OIDC token
         id: idtoken
@@ -40,17 +46,18 @@ jobs:
             const token = await core.getIDToken();
             return token;
       
-      - name: Build And Deploy
+      - name: Deploy to Azure Static Web Apps
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_STONE_051BF3E1E }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          app_location: "/"
+          app_location: "dist"  # Changed from "/" to "dist"
           api_location: ""
-          output_location: "dist"
+          output_location: ""   # Empty because we already built to dist
           skip_api_build: true
+          skip_app_build: true  # CRITICAL: Skip Oryx build
           github_id_token: ${{ steps.idtoken.outputs.result }}
 
   close_pull_request_job:
