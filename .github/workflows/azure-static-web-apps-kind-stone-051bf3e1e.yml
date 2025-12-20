@@ -17,14 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-          fetch-depth: 0
-      
-      - name: Cleanup git extraheader
-        shell: bash
-        run: |
-          git config --global --unset-all http.https://github.com/.extraheader || true
-      
+          submodules: true
+          lfs: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -54,9 +49,9 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
           app_location: "dist"
-          api_location: "api"        # Added API location
+          api_location: "api"
           output_location: ""
-          skip_api_build: false      # Changed to false to build API
+          skip_api_build: false
           skip_app_build: true
           github_id_token: ${{ steps.idtoken.outputs.result }}
 
