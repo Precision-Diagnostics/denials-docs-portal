@@ -1,4 +1,9 @@
+const crypto = require('crypto');
+global.crypto = crypto;
+
 const { BlobServiceClient } = require("@azure/storage-blob");
+
+// ... rest of your code
 
 module.exports = async function (context, req) {
     context.log('Search function triggered');
