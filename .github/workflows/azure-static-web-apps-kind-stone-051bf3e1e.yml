@@ -56,7 +56,7 @@ jobs:
           app_location: "dist"
           api_location: "api"
           output_location: ""
-          skip_api_build: true
+          skip_api_build: false
           skip_app_build: true
           github_id_token: ${{ steps.idtoken.outputs.result }}
           
