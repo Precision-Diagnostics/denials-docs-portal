@@ -32,6 +32,11 @@ jobs:
       - name: Build application
         run: npm run build
       
+      - name: Install API dependencies
+        run: |
+          cd api
+          npm install
+      
       - name: Get GitHub OIDC token
         id: idtoken
         uses: actions/github-script@v7
@@ -51,9 +56,8 @@ jobs:
           app_location: "dist"
           api_location: "api"
           output_location: ""
-          skip_api_build: false
+          skip_api_build: true
           skip_app_build: true
-          api_build_command: "npm install"    # ← Add this line
           github_id_token: ${{ steps.idtoken.outputs.result }}
           
   close_pull_request_job:
