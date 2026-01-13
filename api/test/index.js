@@ -21,7 +21,7 @@ module.exports = async function (context, req) {
         const date = new Date().toUTCString();
         const version = '2020-10-02';
         
-        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nmaxresults:500\nrestype:container`;
+        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nmaxresults:100\nrestype:container`;
         
         const keyBuffer = Buffer.from(accountKey, 'base64');
         const hmac = crypto.createHmac('sha256', keyBuffer);
@@ -31,7 +31,7 @@ module.exports = async function (context, req) {
         const result = await new Promise((resolve, reject) => {
             const options = {
                 hostname: `${accountName}.blob.core.windows.net`,
-                path: `/${containerName}?restype=container&comp=list&maxresults=500`,
+                path: `/${containerName}?restype=container&comp=list&maxresults=100`,
                 method: 'GET',
                 headers: {
                     'x-ms-date': date,
@@ -81,8 +81,3 @@ module.exports = async function (context, req) {
         };
     }
 };
-```
-
-Commit, push, and test:
-```
-https://kind-stone-051bf3e1e.6.azurestaticapps.net/api/test?q=250537215
