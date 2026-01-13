@@ -2,33 +2,11 @@ const https = require('https');
 const crypto = require('crypto');
 
 module.exports = async function (context, req) {
-    context.log('Search function triggered');
-    
-    const accessionNumber = req.query.accessionNumber;
-    
-    if (!accessionNumber) {
-        context.res = {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ error: "Please provide an accessionNumber parameter" })
-        };
-        return;
-    }
-
     try {
         const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
         const containerName = process.env.AZURE_CONTAINER_NAME || "documents";
+        const searchTerm = req.query.q || "250537215";
         
-        if (!connectionString) {
-            context.res = {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ error: "Storage connection not configured" })
-            };
-            return;
-        }
-
-        // Parse connection string
         const parts = {};
         connectionString.split(';').forEach(part => {
             const [key, ...valueParts] = part.split('=');
@@ -40,70 +18,76 @@ module.exports = async function (context, req) {
         const accountName = parts['AccountName'];
         const accountKey = parts['AccountKey'];
         
-        // List all blobs with prefix search
-        const blobs = await listBlobs(accountName, accountKey, containerName, accessionNumber);
+        const date = new Date().toUTCString();
+        const version = '2020-10-02';
         
-        const results = blobs.map(blob => ({
-            name: blob.name,
-            url: `https://${accountName}.blob.core.windows.net/${containerName}/${encodeURIComponent(blob.name)}`,
-            size: blob.contentLength,
-            lastModified: blob.lastModified,
-            contentType: blob.contentType
-        }));
-
+        // Use prefix filter to narrow results
+        const prefix = searchTerm;
+        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nmaxresults:100\nprefix:${prefix}\nrestype:container`;
+        
+        const keyBuffer = Buffer.from(accountKey, 'base64');
+        const hmac = crypto.createHmac('sha256', keyBuffer);
+        hmac.update(stringToSign, 'utf8');
+        const signature = hmac.digest('base64');
+        
+        const result = await new Promise((resolve, reject) => {
+            const options = {
+                hostname: `${accountName}.blob.core.windows.net`,
+                path: `/${containerName}?restype=container&comp=list&maxresults=100&prefix=${encodeURIComponent(prefix)}`,
+                method: 'GET',
+                headers: {
+                    'x-ms-date': date,
+                    'x-ms-version': version,
+                    'Authorization': `SharedKey ${accountName}:${signature}`
+                }
+            };
+            
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve({ statusCode: res.statusCode, data }));
+            });
+            req.on('error', reject);
+            req.end();
+        });
+        
+        if (result.statusCode !== 200) {
+            context.res = {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: `API returned ${result.statusCode}`, body: result.data.substring(0, 500) })
+            };
+            return;
+        }
+        
+        // Extract blob names
+        const names = [];
+        const regex = /<Name>([^<]*)<\/Name>/g;
+        let match;
+        while ((match = regex.exec(result.data)) !== null) {
+            names.push(match[1]);
+        }
+        
         context.res = {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                count: results.length,
-                accessionNumber: accessionNumber,
-                results: results
+                success: true,
+                searchTerm: searchTerm,
+                count: names.length,
+                files: names
             })
         };
     } catch (error) {
-        context.log.error('Search error:', error);
         context.res = {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                error: `Search failed: ${error.message}`
-            })
+            body: JSON.stringify({ error: error.message })
         };
     }
 };
+```
 
-async function listBlobs(accountName, accountKey, containerName, searchTerm) {
-    const allBlobs = [];
-    let marker = '';
-    
-    do {
-        const result = await listBlobsPage(accountName, accountKey, containerName, marker);
-        
-        // Filter blobs that contain the search term
-        const matchingBlobs = result.blobs.filter(blob => 
-            blob.name.includes(searchTerm)
-        );
-        allBlobs.push(...matchingBlobs);
-        
-        marker = result.nextMarker;
-    } while (marker);
-    
-    return allBlobs;
-}
-
-async function listBlobsPage(accountName, accountKey, containerName, marker) {
-    const date = new Date().toUTCString();
-    const version = '2020-10-02';
-    
-    // Build query string and canonicalized resource
-    let queryString = `restype=container&comp=list&maxresults=1000`;
-    let canonicalizedResource = `/${accountName}/${containerName}\ncomp:list\nmaxresults:1000`;
-    
-    if (marker) {
-        queryString += `&marker=${encodeURIComponent(marker)}`;
-        canonicalizedResource = `/${accountName}/${containerName}\ncomp:list\nmarker:${marker}\nmaxresults:1000`;
-    }
-    
-    canonicalizedResource += `\nrestype:container`;
-    
-    const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms
+Commit, push, and visit:
+```
+https://kind-stone-051bf3e1e.6.azurestaticapps.net/api/test?q=250537215
