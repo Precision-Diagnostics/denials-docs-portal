@@ -5,7 +5,7 @@ module.exports = async function (context, req) {
     try {
         const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
         const containerName = process.env.AZURE_CONTAINER_NAME || "documents";
-        const searchTerm = req.query.q || "250537215";
+        const searchTerm = req.query.q || "";
         
         const parts = {};
         connectionString.split(';').forEach(part => {
@@ -21,9 +21,7 @@ module.exports = async function (context, req) {
         const date = new Date().toUTCString();
         const version = '2020-10-02';
         
-        // Use prefix filter to narrow results
-        const prefix = searchTerm;
-        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nmaxresults:100\nprefix:${prefix}\nrestype:container`;
+        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nmaxresults:500\nrestype:container`;
         
         const keyBuffer = Buffer.from(accountKey, 'base64');
         const hmac = crypto.createHmac('sha256', keyBuffer);
@@ -33,7 +31,7 @@ module.exports = async function (context, req) {
         const result = await new Promise((resolve, reject) => {
             const options = {
                 hostname: `${accountName}.blob.core.windows.net`,
-                path: `/${containerName}?restype=container&comp=list&maxresults=100&prefix=${encodeURIComponent(prefix)}`,
+                path: `/${containerName}?restype=container&comp=list&maxresults=500`,
                 method: 'GET',
                 headers: {
                     'x-ms-date': date,
@@ -51,15 +49,6 @@ module.exports = async function (context, req) {
             req.end();
         });
         
-        if (result.statusCode !== 200) {
-            context.res = {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ error: `API returned ${result.statusCode}`, body: result.data.substring(0, 500) })
-            };
-            return;
-        }
-        
         // Extract blob names
         const names = [];
         const regex = /<Name>([^<]*)<\/Name>/g;
@@ -68,14 +57,20 @@ module.exports = async function (context, req) {
             names.push(match[1]);
         }
         
+        // Filter by search term
+        const filtered = searchTerm 
+            ? names.filter(n => n.includes(searchTerm))
+            : names.slice(0, 10);
+        
         context.res = {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 success: true,
                 searchTerm: searchTerm,
-                count: names.length,
-                files: names
+                totalInPage: names.length,
+                matchCount: filtered.length,
+                files: filtered
             })
         };
     } catch (error) {
@@ -88,6 +83,6 @@ module.exports = async function (context, req) {
 };
 ```
 
-Commit, push, and visit:
+Commit, push, and test:
 ```
 https://kind-stone-051bf3e1e.6.azurestaticapps.net/api/test?q=250537215
