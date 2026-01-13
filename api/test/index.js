@@ -22,7 +22,8 @@ module.exports = async function (context, req) {
         const date = new Date().toUTCString();
         const version = '2020-10-02';
         
-        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nrestype:container`;
+        // Query params must be in alphabetical order in the signature
+        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nmaxresults:5\nrestype:container`;
         
         const keyBuffer = Buffer.from(accountKey, 'base64');
         const hmac = crypto.createHmac('sha256', keyBuffer);
@@ -48,8 +49,7 @@ module.exports = async function (context, req) {
                 res.on('end', () => {
                     resolve({
                         statusCode: res.statusCode,
-                        headers: res.headers,
-                        body: data.substring(0, 1000)
+                        body: data.substring(0, 2000)
                     });
                 });
             });
@@ -62,8 +62,6 @@ module.exports = async function (context, req) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 success: true,
-                accountName: accountName,
-                containerName: containerName,
                 response: result
             })
         };
@@ -72,8 +70,7 @@ module.exports = async function (context, req) {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                error: error.message,
-                stack: error.stack
+                error: error.message
             })
         };
     }
