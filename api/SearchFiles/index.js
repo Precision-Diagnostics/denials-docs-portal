@@ -1,4 +1,5 @@
 const https = require('https');
+const crypto = require('crypto');
 
 module.exports = async function (context, req) {
     context.log('Search function triggered');
@@ -28,21 +29,27 @@ module.exports = async function (context, req) {
         }
 
         // Parse connection string
-        const config = parseConnectionString(connectionString);
+        const parts = {};
+        connectionString.split(';').forEach(part => {
+            const [key, ...valueParts] = part.split('=');
+            if (key && valueParts.length > 0) {
+                parts[key] = valueParts.join('=');
+            }
+        });
         
-        // List blobs using REST API
-        const blobs = await listBlobs(config.accountName, config.accountKey, containerName);
+        const accountName = parts['AccountName'];
+        const accountKey = parts['AccountKey'];
         
-        // Filter by accession number
-        const results = blobs
-            .filter(blob => blob.name.includes(accessionNumber))
-            .map(blob => ({
-                name: blob.name,
-                url: `https://${config.accountName}.blob.core.windows.net/${containerName}/${blob.name}`,
-                size: blob.contentLength,
-                lastModified: blob.lastModified,
-                contentType: blob.contentType
-            }));
+        // List all blobs with prefix search
+        const blobs = await listBlobs(accountName, accountKey, containerName, accessionNumber);
+        
+        const results = blobs.map(blob => ({
+            name: blob.name,
+            url: `https://${accountName}.blob.core.windows.net/${containerName}/${encodeURIComponent(blob.name)}`,
+            size: blob.contentLength,
+            lastModified: blob.lastModified,
+            contentType: blob.contentType
+        }));
 
         context.res = {
             status: 200,
@@ -59,79 +66,44 @@ module.exports = async function (context, req) {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                error: `Search failed: ${error.message}`,
-                details: error.toString()
+                error: `Search failed: ${error.message}`
             })
         };
     }
 };
 
-function parseConnectionString(connectionString) {
-    const parts = {};
-    connectionString.split(';').forEach(part => {
-        const [key, ...valueParts] = part.split('=');
-        if (key && valueParts.length > 0) {
-            parts[key] = valueParts.join('=');
-        }
-    });
-    return {
-        accountName: parts['AccountName'],
-        accountKey: parts['AccountKey']
-    };
+async function listBlobs(accountName, accountKey, containerName, searchTerm) {
+    const allBlobs = [];
+    let marker = '';
+    
+    do {
+        const result = await listBlobsPage(accountName, accountKey, containerName, marker);
+        
+        // Filter blobs that contain the search term
+        const matchingBlobs = result.blobs.filter(blob => 
+            blob.name.includes(searchTerm)
+        );
+        allBlobs.push(...matchingBlobs);
+        
+        marker = result.nextMarker;
+    } while (marker);
+    
+    return allBlobs;
 }
 
-async function listBlobs(accountName, accountKey, containerName) {
+async function listBlobsPage(accountName, accountKey, containerName, marker) {
     const date = new Date().toUTCString();
     const version = '2020-10-02';
     
-    const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nrestype:container`;
+    // Build query string and canonicalized resource
+    let queryString = `restype=container&comp=list&maxresults=1000`;
+    let canonicalizedResource = `/${accountName}/${containerName}\ncomp:list\nmaxresults:1000`;
     
-    const signature = createHmacSignature(accountKey, stringToSign);
+    if (marker) {
+        queryString += `&marker=${encodeURIComponent(marker)}`;
+        canonicalizedResource = `/${accountName}/${containerName}\ncomp:list\nmarker:${marker}\nmaxresults:1000`;
+    }
     
-    const options = {
-        hostname: `${accountName}.blob.core.windows.net`,
-        path: `/${containerName}?restype=container&comp=list`,
-        method: 'GET',
-        headers: {
-            'x-ms-date': date,
-            'x-ms-version': version,
-            'Authorization': `SharedKey ${accountName}:${signature}`
-        }
-    };
-
-    return new Promise((resolve, reject) => {
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                if (res.statusCode !== 200) {
-                    reject(new Error(`Blob list failed: ${res.statusCode} - ${data}`));
-                    return;
-                }
-                const blobs = parseXmlBlobs(data);
-                resolve(blobs);
-            });
-        });
-        req.on('error', reject);
-        req.end();
-    });
-}
-
-function createHmacSignature(key, stringToSign) {
-    const crypto = require('crypto');
-    const keyBuffer = Buffer.from(key, 'base64');
-    const hmac = crypto.createHmac('sha256', keyBuffer);
-    hmac.update(stringToSign, 'utf8');
-    return hmac.digest('base64');
-}
-
-function parseXmlBlobs(xml) {
-    const blobs = [];
-    const blobRegex = /<Blob>[\s\S]*?<\/Blob>/g;
-    const matches = xml.match(blobRegex) || [];
+    canonicalizedResource += `\nrestype:container`;
     
-    matches.forEach(blobXml => {
-        const name = extractXmlValue(blobXml, 'Name');
-        const contentLength = extractXmlValue(blobXml, 'Content-Length');
-        const lastModified = extractXmlValue(blobXml, 'Last-Modified');
-        const contentType = extractXmlValue(blobXml, 'Content-Type');
+    const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms
