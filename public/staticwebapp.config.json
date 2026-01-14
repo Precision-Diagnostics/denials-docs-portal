@@ -5,11 +5,11 @@
   "routes": [
     {
       "route": "/api/*",
-      "allowedRoles": ["ADSUser", "PDXUser"]
+      "allowedRoles": ["authenticated"]
     },
     {
       "route": "/*",
-      "allowedRoles": ["ADSUser", "PDXUser"]
+      "allowedRoles": ["authenticated"]
     }
   ],
   "navigationFallback": {
