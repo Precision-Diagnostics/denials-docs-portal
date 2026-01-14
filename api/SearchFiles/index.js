@@ -128,23 +128,24 @@ function generateSasUrl(accountName, accountKey, containerName, blobName) {
     
     const permissions = 'r'; // read only
     const version = '2020-10-02';
+    const resource = 'b'; // blob
     
     const stringToSign = [
-        permissions,
-        formatDate(start),
-        formatDate(expiry),
-        `/blob/${accountName}/${containerName}/${blobName}`,
-        '', // signedIdentifier
-        '', // signedIP
-        '', // signedProtocol
-        version,
-        '', // signedResource (b for blob)
-        '', // signedSnapshotTime
-        '', // rscc (cache-control)
-        '', // rscd (content-disposition)
-        '', // rsce (content-encoding)
-        '', // rscl (content-language)
-        ''  // rsct (content-type)
+        permissions,                                              // sp
+        formatDate(start),                                        // st
+        formatDate(expiry),                                       // se
+        `/blob/${accountName}/${containerName}/${blobName}`,      // canonicalized resource
+        '',                                                       // signedIdentifier
+        '',                                                       // signedIP
+        '',                                                       // signedProtocol
+        version,                                                  // sv
+        resource,                                                 // sr (b for blob)
+        '',                                                       // snapshot time
+        '',                                                       // rscc
+        '',                                                       // rscd
+        '',                                                       // rsce
+        '',                                                       // rscl
+        ''                                                        // rsct
     ].join('\n');
     
     const keyBuffer = Buffer.from(accountKey, 'base64');
@@ -156,7 +157,7 @@ function generateSasUrl(accountName, accountKey, containerName, blobName) {
         'sv': version,
         'st': formatDate(start),
         'se': formatDate(expiry),
-        'sr': 'b',
+        'sr': resource,
         'sp': permissions,
         'sig': signature
     });
