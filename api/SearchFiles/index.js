@@ -129,6 +129,7 @@ function generateSasUrl(accountName, accountKey, containerName, blobName) {
     const permissions = 'r'; // read only
     const version = '2020-10-02';
     const resource = 'b'; // blob
+    const contentDisposition = `attachment; filename="${blobName}"`;
     
     const stringToSign = [
         permissions,                                              // sp
@@ -141,11 +142,11 @@ function generateSasUrl(accountName, accountKey, containerName, blobName) {
         version,                                                  // sv
         resource,                                                 // sr (b for blob)
         '',                                                       // snapshot time
-        '',                                                       // rscc
-        '',                                                       // rscd
-        '',                                                       // rsce
-        '',                                                       // rscl
-        ''                                                        // rsct
+        '',                                                       // rscc (cache-control)
+        contentDisposition,                                       // rscd (content-disposition)
+        '',                                                       // rsce (content-encoding)
+        '',                                                       // rscl (content-language)
+        ''                                                        // rsct (content-type)
     ].join('\n');
     
     const keyBuffer = Buffer.from(accountKey, 'base64');
@@ -159,6 +160,7 @@ function generateSasUrl(accountName, accountKey, containerName, blobName) {
         'se': formatDate(expiry),
         'sr': resource,
         'sp': permissions,
+        'rscd': contentDisposition,
         'sig': signature
     });
     
