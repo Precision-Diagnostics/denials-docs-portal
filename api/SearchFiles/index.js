@@ -82,9 +82,12 @@ module.exports = async function (context, req) {
             const contentType = extractValue(blobXml, 'Content-Type');
             
             if (name) {
+                // Generate SAS URL for download
+                const sasUrl = generateSasUrl(accountName, accountKey, containerName, name);
+                
                 blobs.push({
                     name: name,
-                    url: `https://${accountName}.blob.core.windows.net/${containerName}/${encodeURIComponent(name)}`,
+                    url: sasUrl,
                     size: parseInt(size) || 0,
                     lastModified: lastModified,
                     contentType: contentType || 'application/octet-stream'
@@ -114,4 +117,49 @@ function extractValue(xml, tag) {
     const regex = new RegExp(`<${tag}>([^<]*)</${tag}>`);
     const match = xml.match(regex);
     return match ? match[1] : null;
+}
+
+function generateSasUrl(accountName, accountKey, containerName, blobName) {
+    const now = new Date();
+    const start = new Date(now.getTime() - 5 * 60 * 1000); // 5 minutes ago
+    const expiry = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
+    
+    const formatDate = (d) => d.toISOString().substring(0, 19) + 'Z';
+    
+    const permissions = 'r'; // read only
+    const version = '2020-10-02';
+    
+    const stringToSign = [
+        permissions,
+        formatDate(start),
+        formatDate(expiry),
+        `/blob/${accountName}/${containerName}/${blobName}`,
+        '', // signedIdentifier
+        '', // signedIP
+        '', // signedProtocol
+        version,
+        '', // signedResource (b for blob)
+        '', // signedSnapshotTime
+        '', // rscc (cache-control)
+        '', // rscd (content-disposition)
+        '', // rsce (content-encoding)
+        '', // rscl (content-language)
+        ''  // rsct (content-type)
+    ].join('\n');
+    
+    const keyBuffer = Buffer.from(accountKey, 'base64');
+    const hmac = crypto.createHmac('sha256', keyBuffer);
+    hmac.update(stringToSign, 'utf8');
+    const signature = hmac.digest('base64');
+    
+    const sasParams = new URLSearchParams({
+        'sv': version,
+        'st': formatDate(start),
+        'se': formatDate(expiry),
+        'sr': 'b',
+        'sp': permissions,
+        'sig': signature
+    });
+    
+    return `https://${accountName}.blob.core.windows.net/${containerName}/${encodeURIComponent(blobName)}?${sasParams.toString()}`;
 }
