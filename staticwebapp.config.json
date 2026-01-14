@@ -4,10 +4,6 @@
   },
   "routes": [
     {
-      "route": "/api/test",
-      "allowedRoles": ["anonymous"]
-    },
-    {
       "route": "/api/*",
       "allowedRoles": ["ADSUser", "PDXUser"]
     },
