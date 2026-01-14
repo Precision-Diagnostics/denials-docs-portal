@@ -21,7 +21,8 @@ module.exports = async function (context, req) {
         const date = new Date().toUTCString();
         const version = '2020-10-02';
         
-        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nmaxresults:100\nrestype:container`;
+        // Alphabetical order: comp, maxresults, prefix, restype
+        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n/${accountName}/${containerName}\ncomp:list\nmaxresults:100\nprefix:${searchTerm}\nrestype:container`;
         
         const keyBuffer = Buffer.from(accountKey, 'base64');
         const hmac = crypto.createHmac('sha256', keyBuffer);
@@ -31,7 +32,7 @@ module.exports = async function (context, req) {
         const result = await new Promise((resolve, reject) => {
             const options = {
                 hostname: `${accountName}.blob.core.windows.net`,
-                path: `/${containerName}?restype=container&comp=list&maxresults=100`,
+                path: `/${containerName}?restype=container&comp=list&maxresults=100&prefix=${encodeURIComponent(searchTerm)}`,
                 method: 'GET',
                 headers: {
                     'x-ms-date': date,
@@ -49,6 +50,18 @@ module.exports = async function (context, req) {
             req.end();
         });
         
+        if (result.statusCode !== 200) {
+            context.res = {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    error: `API error ${result.statusCode}`,
+                    details: result.data.substring(0, 500)
+                })
+            };
+            return;
+        }
+        
         // Extract blob names
         const names = [];
         const regex = /<Name>([^<]*)<\/Name>/g;
@@ -57,20 +70,14 @@ module.exports = async function (context, req) {
             names.push(match[1]);
         }
         
-        // Filter by search term
-        const filtered = searchTerm 
-            ? names.filter(n => n.includes(searchTerm))
-            : names.slice(0, 10);
-        
         context.res = {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 success: true,
                 searchTerm: searchTerm,
-                totalInPage: names.length,
-                matchCount: filtered.length,
-                files: filtered
+                count: names.length,
+                files: names
             })
         };
     } catch (error) {
@@ -81,3 +88,8 @@ module.exports = async function (context, req) {
         };
     }
 };
+```
+
+Commit, push, and test:
+```
+https://kind-stone-051bf3e1e.6.azurestaticapps.net/api/test?q=250537215
