@@ -3,10 +3,8 @@ const crypto = require('crypto');
 
 module.exports = async function (context, req) {
     try {
-        const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-        const containerName = process.env.AZURE_CONTAINER_NAME || "documents";
         const accessionNumber = req.query.accessionNumber || "";
-        
+
         if (!accessionNumber) {
             context.res = {
                 status: 400,
@@ -15,92 +13,38 @@ module.exports = async function (context, req) {
             };
             return;
         }
-        
-        const parts = {};
-        connectionString.split(';').forEach(part => {
-            const idx = part.indexOf('=');
-            if (idx > 0) {
-                parts[part.substring(0, idx)] = part.substring(idx + 1);
+
+        // Configure each storage source. Add more entries here to search additional containers.
+        const sources = [
+            {
+                label: "CareEvolve",
+                connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
+                containerName: process.env.AZURE_CONTAINER_NAME || "documents"
+            },
+            {
+                label: "EHR",
+                connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING_2,
+                containerName: process.env.AZURE_CONTAINER_NAME_2 || "hl7pdfs"
             }
-        });
-        
-        const accountName = parts['AccountName'];
-        const accountKey = parts['AccountKey'];
-        
-        const date = new Date().toUTCString();
-        const version = '2020-10-02';
-        
-        const canonicalizedResource = `/${accountName}/${containerName}\ncomp:list\nmaxresults:100\nprefix:${accessionNumber}\nrestype:container`;
-        const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n${canonicalizedResource}`;
-        
-        const keyBuffer = Buffer.from(accountKey, 'base64');
-        const hmac = crypto.createHmac('sha256', keyBuffer);
-        hmac.update(stringToSign, 'utf8');
-        const signature = hmac.digest('base64');
-        
-        const path = `/${containerName}?restype=container&comp=list&maxresults=100&prefix=${encodeURIComponent(accessionNumber)}`;
-        
-        const result = await new Promise((resolve, reject) => {
-            const options = {
-                hostname: `${accountName}.blob.core.windows.net`,
-                path: path,
-                method: 'GET',
-                headers: {
-                    'x-ms-date': date,
-                    'x-ms-version': version,
-                    'Authorization': `SharedKey ${accountName}:${signature}`
-                }
-            };
-            
-            const httpsReq = https.request(options, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => resolve({ statusCode: res.statusCode, data }));
-            });
-            httpsReq.on('error', (e) => resolve({ statusCode: 0, data: e.message }));
-            httpsReq.end();
-        });
-        
-        if (result.statusCode !== 200) {
-            context.res = {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ error: `Storage API error: ${result.statusCode}` })
-            };
-            return;
-        }
-        
-        // Parse blobs from XML
-        const blobs = [];
-        const blobRegex = /<Blob>[\s\S]*?<\/Blob>/g;
-        const matches = result.data.match(blobRegex) || [];
-        
-        matches.forEach(blobXml => {
-            const name = extractValue(blobXml, 'Name');
-            const size = extractValue(blobXml, 'Content-Length');
-            const lastModified = extractValue(blobXml, 'Last-Modified');
-            const contentType = extractValue(blobXml, 'Content-Type');
-            
-            if (name) {
-                // Generate SAS URL for download
-                const sasUrl = generateSasUrl(accountName, accountKey, containerName, name);
-                
-                blobs.push({
-                    name: name,
-                    url: sasUrl,
-                    size: parseInt(size) || 0,
-                    lastModified: lastModified,
-                    contentType: contentType || 'application/octet-stream'
-                });
-            }
-        });
-        
+        ].filter(s => s.connectionString);
+
+        // Query all sources in parallel; a failure in one source doesn't fail the whole search
+        const perSource = await Promise.all(
+            sources.map(s => searchContainer(s, accessionNumber).catch(err => {
+                context.log.error(`Source ${s.label} failed:`, err.message);
+                return [];
+            }))
+        );
+
+        const blobs = perSource.flat();
+        blobs.sort((a, b) => a.name.localeCompare(b.name));
+
         context.res = {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 count: blobs.length,
-                accessionNumber: accessionNumber,
+                accessionNumber,
                 results: blobs
             })
         };
@@ -113,56 +57,114 @@ module.exports = async function (context, req) {
     }
 };
 
+async function searchContainer(source, accessionNumber) {
+    const parts = {};
+    source.connectionString.split(';').forEach(part => {
+        const idx = part.indexOf('=');
+        if (idx > 0) parts[part.substring(0, idx)] = part.substring(idx + 1);
+    });
+
+    const accountName = parts['AccountName'];
+    const accountKey = parts['AccountKey'];
+    const containerName = source.containerName;
+
+    const date = new Date().toUTCString();
+    const version = '2020-10-02';
+
+    const canonicalizedResource = `/${accountName}/${containerName}\ncomp:list\nmaxresults:100\nprefix:${accessionNumber}\nrestype:container`;
+    const stringToSign = `GET\n\n\n\n\n\n\n\n\n\n\n\nx-ms-date:${date}\nx-ms-version:${version}\n${canonicalizedResource}`;
+
+    const keyBuffer = Buffer.from(accountKey, 'base64');
+    const hmac = crypto.createHmac('sha256', keyBuffer);
+    hmac.update(stringToSign, 'utf8');
+    const signature = hmac.digest('base64');
+
+    const path = `/${containerName}?restype=container&comp=list&maxresults=100&prefix=${encodeURIComponent(accessionNumber)}`;
+
+    const result = await new Promise((resolve) => {
+        const options = {
+            hostname: `${accountName}.blob.core.windows.net`,
+            path,
+            method: 'GET',
+            headers: {
+                'x-ms-date': date,
+                'x-ms-version': version,
+                'Authorization': `SharedKey ${accountName}:${signature}`
+            }
+        };
+        const httpsReq = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => resolve({ statusCode: res.statusCode, data }));
+        });
+        httpsReq.on('error', (e) => resolve({ statusCode: 0, data: e.message }));
+        httpsReq.end();
+    });
+
+    if (result.statusCode !== 200) {
+        throw new Error(`Storage API ${result.statusCode}: ${result.data}`);
+    }
+
+    const blobs = [];
+    const matches = result.data.match(/<Blob>[\s\S]*?<\/Blob>/g) || [];
+
+    matches.forEach(blobXml => {
+        const name = extractValue(blobXml, 'Name');
+        const size = extractValue(blobXml, 'Content-Length');
+        const lastModified = extractValue(blobXml, 'Last-Modified');
+        const contentType = extractValue(blobXml, 'Content-Type');
+
+        if (name) {
+            blobs.push({
+                name,
+                url: generateSasUrl(accountName, accountKey, containerName, name),
+                size: parseInt(size) || 0,
+                lastModified,
+                contentType: contentType || 'application/octet-stream',
+                source: source.label
+            });
+        }
+    });
+
+    return blobs;
+}
+
 function extractValue(xml, tag) {
-    const regex = new RegExp(`<${tag}>([^<]*)</${tag}>`);
-    const match = xml.match(regex);
+    const match = xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`));
     return match ? match[1] : null;
 }
 
 function generateSasUrl(accountName, accountKey, containerName, blobName) {
     const now = new Date();
-    const start = new Date(now.getTime() - 5 * 60 * 1000); // 5 minutes ago
-    const expiry = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
-    
+    const start = new Date(now.getTime() - 5 * 60 * 1000);
+    const expiry = new Date(now.getTime() + 60 * 60 * 1000);
     const formatDate = (d) => d.toISOString().substring(0, 19) + 'Z';
-    
-    const permissions = 'r'; // read only
+
+    const permissions = 'r';
     const version = '2020-10-02';
-    const resource = 'b'; // blob
+    const resource = 'b';
     const contentDisposition = `attachment; filename="${blobName}"`;
-    
+
     const stringToSign = [
-        permissions,                                              // sp
-        formatDate(start),                                        // st
-        formatDate(expiry),                                       // se
-        `/blob/${accountName}/${containerName}/${blobName}`,      // canonicalized resource
-        '',                                                       // signedIdentifier
-        '',                                                       // signedIP
-        '',                                                       // signedProtocol
-        version,                                                  // sv
-        resource,                                                 // sr (b for blob)
-        '',                                                       // snapshot time
-        '',                                                       // rscc (cache-control)
-        contentDisposition,                                       // rscd (content-disposition)
-        '',                                                       // rsce (content-encoding)
-        '',                                                       // rscl (content-language)
-        ''                                                        // rsct (content-type)
+        permissions, formatDate(start), formatDate(expiry),
+        `/blob/${accountName}/${containerName}/${blobName}`,
+        '', '', '', version, resource, '', '', contentDisposition, '', '', ''
     ].join('\n');
-    
+
     const keyBuffer = Buffer.from(accountKey, 'base64');
     const hmac = crypto.createHmac('sha256', keyBuffer);
     hmac.update(stringToSign, 'utf8');
     const signature = hmac.digest('base64');
-    
+
     const sasParams = new URLSearchParams({
-        'sv': version,
-        'st': formatDate(start),
-        'se': formatDate(expiry),
-        'sr': resource,
-        'sp': permissions,
-        'rscd': contentDisposition,
-        'sig': signature
+        sv: version,
+        st: formatDate(start),
+        se: formatDate(expiry),
+        sr: resource,
+        sp: permissions,
+        rscd: contentDisposition,
+        sig: signature
     });
-    
+
     return `https://${accountName}.blob.core.windows.net/${containerName}/${encodeURIComponent(blobName)}?${sasParams.toString()}`;
 }
